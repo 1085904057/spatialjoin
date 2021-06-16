@@ -3,15 +3,19 @@ package org.apache.spark.spatialjoin.index.local.rtree3d
 import java.sql.Timestamp
 
 import org.apache.spark.spatialjoin.extractor.STExtractor
-import org.apache.spark.spatialjoin.index.local.rtree.ItemBoundable
+import org.locationtech.jts.geom.{Envelope, Geometry}
 
 /**
   * @author wangrubin3
   **/
-class STItemBoundable[T](item: T, extractor: STExtractor[T])
-  extends ItemBoundable[T](item, extractor) with STBoundable {
+class STItemBoundable[T](item: T, extractor: STExtractor[T]) extends STBoundable {
+  override def getBound: Envelope = extractor.geom(item).getEnvelopeInternal
+
+  def getItem: T = this.item
+
+  def getGeom: Geometry = extractor.geom(item)
 
   override def getMinTime: Timestamp = extractor.startTime(item)
 
-  override def getMaxTime: Timestamp = extractor.endTime(item)
+  override def getMaxTime:Timestamp = extractor.endTime(item)
 }

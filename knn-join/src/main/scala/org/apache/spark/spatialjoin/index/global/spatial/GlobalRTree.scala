@@ -1,9 +1,8 @@
 package org.apache.spark.spatialjoin.index.global.spatial
 
-import org.apache.spark.spatialjoin.extractor.GeomExtractor
-import org.apache.spark.spatialjoin.index.local.rtree.{Boundable, ItemBoundable, RTreeIndex, RTreeNode}
-import org.apache.spark.spatialjoin.utils.GeomUtils
-import org.locationtech.jts.geom.{Envelope, Geometry, Point}
+import java.util.PriorityQueue
+
+import org.locationtech.jts.geom.{Envelope, Point}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -11,38 +10,94 @@ import scala.collection.mutable.ArrayBuffer
 /**
   * @author wangrubin3
   **/
-class GlobalRTree(nodeCapacity: Int) extends RTreeIndex[Envelope](
-  new GeomExtractor[Envelope] {
-    override def geom(row: Envelope): Geometry = GeomUtils.defaultFactory.toGeometry(row)
-  }, nodeCapacity) with GlobalIndex {
-
-  private var leafNodes: Array[RTreeNode] = _
+class GlobalRTree(nodeCapacity: Int) extends GlobalIndex {
+  private var root: RTreeNode = _
+  private var leafNodes: ArrayBuffer[RTreeNode] = _
 
   def build(samples: Array[Envelope]): Unit = {
-    samples.foreach(env => insert(env))
-    build() //build rtree index
-    val leafNodeBuffer = new ArrayBuffer[RTreeNode]()
-    root.collectLeafNodes(leafNodeBuffer)
-    leafNodes = leafNodeBuffer.toArray
+    require(samples.nonEmpty, "samples must be not empty")
+    this.leafNodes = createParentBoundables(samples.toBuffer.asInstanceOf[ArrayBuffer[Envelope]], 0)
+    this.root = this.createHigherLevels(this.leafNodes, 1)
+  }
+
+  private def createNode(childBoundables: Array[_ <: Envelope], level: Int): RTreeNode = {
+    val bound = new Envelope()
+    childBoundables.foreach(bound.expandToInclude)
+    val node = new RTreeNode(bound, level)
+    if (level > 0) {
+      node.addChildNodes(childBoundables.map(_.asInstanceOf[RTreeNode]))
+    }
+    node
+  }
+
+  private def createHigherLevels(boundables: ArrayBuffer[RTreeNode], higherLevel: Int): RTreeNode = {
+    assert(boundables.nonEmpty)
+    val parentBoundables = this.createParentBoundables(boundables, higherLevel)
+    if (parentBoundables.length == 1) parentBoundables(0)
+    else this.createHigherLevels(parentBoundables, higherLevel + 1)
+  }
+
+  private def createParentBoundables(childBoundables: ArrayBuffer[_ <: Envelope],
+                                     parentLevel: Int): ArrayBuffer[RTreeNode] = {
+    //prepare parameters
+    assert(childBoundables.nonEmpty)
+    val minLeafCount = Math.ceil(childBoundables.length / nodeCapacity.toDouble).toInt
+    val sliceCount = Math.ceil(Math.sqrt(minLeafCount)).toInt
+
+    //split horizontally
+    val verticalSlices = createVerticalSlices(childBoundables, sliceCount)
+
+    //split vertically
+    val parentBoundables = new ArrayBuffer[RTreeNode]
+    for (i <- verticalSlices.indices) {
+      parentBoundables ++= createParentBoundableFromVerticalSlice(verticalSlices(i), parentLevel)
+    }
+
+    //result
+    parentBoundables
+  }
+
+  //horizontal split
+  private def createVerticalSlices(childBoundables: ArrayBuffer[_ <: Envelope],
+                                   sliceCount: Int): Array[ArrayBuffer[_ <: Envelope]] = {
+
+    val sliceCapacity = Math.ceil(childBoundables.size / sliceCount.toDouble).toInt
+    childBoundables.sortBy(bound => bound.getMinX + bound.getMaxX) //sorted by centre x
+      .grouped(sliceCapacity).filter(_.nonEmpty).toArray
+  }
+
+  //vertical split
+  private def createParentBoundableFromVerticalSlice(childBoundables: ArrayBuffer[_ <: Envelope],
+                                                     parentLevel: Int): Array[RTreeNode] = {
+
+    assert(childBoundables.nonEmpty)
+    childBoundables.sortBy(bound => bound.getMinY + bound.getMaxY) //sort by centre y
+      .grouped(nodeCapacity).map(boundables => {
+      this.createNode(boundables.toArray, parentLevel)
+    }).toArray
+  }
+
+  override def updateBound(leafNodeMap: Map[Int, Envelope]): Unit = {
+    root.updateNodeBound(leafNodeMap)
+  }
+
+  private def distance(oneBoundable: RTreeNode, otherBoundable: Point): Double = {
+    oneBoundable.centre().distance(otherBoundable.getCoordinate)
   }
 
   override def findNearestId(queryCentre: Point,
                              timeFilter: GlobalNode => Boolean): Int = {
 
     val nodeQueue = buildQueue(true)
-    val queryExtractor = new GeomExtractor[Point] {
-      override def geom(row: Point): Geometry = row
-    }
-    val queryBoundable = new ItemBoundable(queryCentre, queryExtractor)
-    nodeQueue.add((root, distance(root, queryBoundable)))
+    nodeQueue.add((root, distance(root, queryCentre)))
 
     while (!nodeQueue.isEmpty) {
       val (nearestNode, _) = nodeQueue.poll
       nearestNode match {
         case node: RTreeNode =>
           if (node.getLevel > 0) { //no leaf node
-            node.getChildBoundables.foreach(child => {
-              nodeQueue.add(child, distance(child, queryBoundable))
+            node.getChildNodes.foreach(child => {
+              nodeQueue.add(child, distance(child, queryCentre))
             })
           } else { //leaf node
             if (timeFilter(node)) return node.getPartitionId
@@ -55,13 +110,13 @@ class GlobalRTree(nodeCapacity: Int) extends RTreeIndex[Envelope](
   override def findIntersectIds(queryEnv: Envelope,
                                 idCollector: ArrayBuffer[Int]): Unit = {
 
-    val queue = new mutable.Queue[Boundable]()
-    if (queryEnv.intersects(root.getBound)) queue.enqueue(root)
+    val queue = new mutable.Queue[RTreeNode]()
+    if (queryEnv.intersects(root.bound)) queue.enqueue(root)
     while (queue.nonEmpty) {
       queue.dequeue() match {
         case node: RTreeNode =>
           if (node.getLevel > 0) { //no leaf node
-            queue.enqueue(node.getChildBoundables.filter(_.getBound.intersects(queryEnv)): _*)
+            queue.enqueue(node.getChildNodes.filter(_.bound.intersects(queryEnv)): _*)
           } else { //leaf node
             idCollector += node.getPartitionId
           }
@@ -76,18 +131,15 @@ class GlobalRTree(nodeCapacity: Int) extends RTreeIndex[Envelope](
     baseId + leafNodes.length
   }
 
-  override def getLeafEnv(index: Int): Envelope = leafNodes(index).getBound
+  override def getLeafEnv(index: Int): Envelope = leafNodes(index).bound
 
-  override def distance(oneBoundable: Boundable, otherBoundable: Boundable): Double = {
-    (oneBoundable, otherBoundable) match {
-      case (oneItemBoundable: ItemBoundable[Envelope], otherItemBoundable: ItemBoundable[Point]) =>
-        oneItemBoundable.getItem.centre().distance(otherItemBoundable.getItem.getCoordinate)
-      case _ =>
-        oneBoundable.getBound.distance(otherBoundable.getBound)
+  private def buildQueue(isNormal: Boolean): PriorityQueue[(RTreeNode, Double)] = {
+    val comparator = new Ordering[(RTreeNode, Double)] {
+      override def compare(x: (RTreeNode, Double), y: (RTreeNode, Double)): Int = {
+        val value = java.lang.Double.compare(x._2, y._2)
+        if (isNormal) value else -value
+      }
     }
-  }
-
-  override def updateBound(leafNodeMap: Map[Int, Envelope]): Unit = {
-    root.updateNodeBound(leafNodeMap)
+    new PriorityQueue[(RTreeNode, Double)](comparator)
   }
 }
