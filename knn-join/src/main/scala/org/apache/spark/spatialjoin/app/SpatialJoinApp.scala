@@ -34,7 +34,7 @@ object SpatialJoinApp {
     val rightPath = args(6)
     val storePath = args(7)
 
-    val stKnnJoin = new STKnnJoin(deltaMilli, k, alpha, beta, binNum, true)
+    val stKnnJoin = new STKnnJoin(deltaMilli, k, alpha, beta, binNum)
 
     //function for parsing spatio-temporal record from file to rdd
     val readRdd = (filePath: String) => spark.textFile(filePath)
