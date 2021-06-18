@@ -30,8 +30,8 @@ object SpatialJoinApp {
     val deltaMilli: Long = args(3).toInt * 60 * 1000 // time unit for args(3) is minute, experiment value is 30 minutes
     val k = args(4).toInt //experiment value is 15
 
-    val leftPath = args(5)
-    val rightPath = args(6)
+    val leftPath = args(5) //data path of dataset R
+    val rightPath = args(6) //data path of dataset S
     val storePath = args(7)
 
     val stKnnJoin = new STKnnJoin(deltaMilli, k, alpha, beta, binNum)
