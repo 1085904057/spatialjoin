@@ -1,5 +1,7 @@
 package org.apache.spark.spatialjoin.knnjoin
 
+import java.util.Comparator
+
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.spatialjoin.extractor.STExtractor
@@ -12,6 +14,7 @@ import org.apache.spark.util.CollectionAccumulator
 import org.locationtech.jts.geom.Envelope
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 /**
@@ -146,10 +149,12 @@ class STKnnJoin(deltaMilli: Long, k: Int, alpha: Int, beta: Int, binNum: Int, is
       }
     }.groupByKey().map {
       case (RowWithId(_, leftRow), candidateIter) =>
-        val candidates = candidateIter.foldLeft(Array.empty[(S, Double)])((a, b) => a ++ b)
-          .sortBy(_._2).map(_._1)
-        val kNN = candidates.slice(0, Math.min(k, candidates.length))
-        (leftRow, kNN)
+        val comparator = new Comparator[(S, Double)] {
+          override def compare(o1: (S, Double), o2: (S, Double)): Int = {
+            o1._2.compare(o2._2)
+          }
+        }
+        (leftRow, multiWaySort[(S, Double)](candidateIter, comparator, k))
     }.count()
 
     val totalTime = (System.currentTimeMillis() - originalTime) / 1E3
@@ -172,5 +177,27 @@ class STKnnJoin(deltaMilli: Long, k: Int, alpha: Int, beta: Int, binNum: Int, is
       s"hitRate:$hitRate"*/
 
     //Seq(s"totalTime:$totalTime", statistic).mkString("\n")
+  }
+
+  def multiWaySort[T: ClassTag](multiArrays: Iterable[Array[T]],
+                                comparator: Comparator[T],
+                                k: Int): Array[T] = {
+
+    val multiIterators = multiArrays.toArray.filter(_.nonEmpty).map(_.iterator)
+    val newComparator = new Comparator[(T, Int)] {
+      override def compare(o1: (T, Int), o2: (T, Int)): Int = comparator.compare(o1._1, o2._1)
+    }
+    val priorityQueue = new java.util.PriorityQueue[(T, Int)](multiIterators.length, newComparator)
+    for (index <- multiIterators.indices) {
+      priorityQueue.add((multiIterators(index).next(), index))
+    }
+
+    val sortedArray = new ArrayBuffer[T]()
+    while (!priorityQueue.isEmpty && sortedArray.length < k) {
+      val (min, index) = priorityQueue.poll()
+      sortedArray += min
+      if (multiIterators(index).hasNext) priorityQueue.add((multiIterators(index).next(), index))
+    }
+    sortedArray.toArray[T]
   }
 }
