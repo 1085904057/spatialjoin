@@ -1,4 +1,4 @@
-package org.apache.spark.spatialjoin.knnjoin
+package org.apache.spark.spatialjoin.join
 
 import org.apache.spark.Partitioner
 import org.apache.spark.spatialjoin.extractor.STExtractor

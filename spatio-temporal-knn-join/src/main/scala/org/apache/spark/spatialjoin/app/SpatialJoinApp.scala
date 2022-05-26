@@ -5,7 +5,7 @@ import java.sql.Timestamp
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.spatialjoin.extractor.STExtractor
-import org.apache.spark.spatialjoin.knnjoin.STKnnJoin
+import org.apache.spark.spatialjoin.join.SpatioTemporalKnnJoin
 import org.apache.spark.spatialjoin.serialize.GeometryKryoRegistrator
 import org.apache.spark.spatialjoin.utils.WKTUtils
 import org.locationtech.jts.geom.Geometry
@@ -34,7 +34,7 @@ object SpatialJoinApp {
     val rightPath = args(6) //data path of dataset S
     val storePath = args(7)
 
-    val stKnnJoin = new STKnnJoin(deltaMilli, k, alpha, beta, binNum)
+    val stKnnJoin = new SpatioTemporalKnnJoin(deltaMilli, k, alpha, beta, binNum)
 
     //function for parsing spatio-temporal record from file to rdd
     val readRdd = (filePath: String) => spark.textFile(filePath)

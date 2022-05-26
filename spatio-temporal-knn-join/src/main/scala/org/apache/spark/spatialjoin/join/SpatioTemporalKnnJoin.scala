@@ -1,4 +1,4 @@
-package org.apache.spark.spatialjoin.knnjoin
+package org.apache.spark.spatialjoin.join
 
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
@@ -18,7 +18,7 @@ import scala.reflect.ClassTag
   * @author wangrubin3
   * @desc if use rtree as spatial partition index, set isQuadIndex as false
   **/
-class STKnnJoin(deltaMilli: Long, k: Int, alpha: Int, beta: Int, binNum: Int, isQuadIndex: Boolean = true) extends Serializable {
+class SpatioTemporalKnnJoin(deltaMilli: Long, k: Int, alpha: Int, beta: Int, binNum: Int, isQuadIndex: Boolean = true) extends Serializable {
 
   def join[R: ClassTag, S: ClassTag](leftRdd: RDD[R],
                                      rightRdd: RDD[S],

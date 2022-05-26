@@ -78,7 +78,7 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <finalName>knnjoin</finalName>
+                            <finalName>spatio-temporal-knn-join</finalName>
                             <filters>
                                 <filter>
                                     <excludes>

@@ -1,4 +1,4 @@
-package org.apache.spark.spatialjoin.knnjoin
+package org.apache.spark.spatialjoin.join
 
 import java.sql.Timestamp
 
