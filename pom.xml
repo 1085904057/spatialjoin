@@ -9,9 +9,9 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <modules>
-        <module>knnjoin</module>
-        <module>locationspark</module>
-        <module>simba</module>
+        <module>spatio-temporal-knn-join</module>
+        <module>spatial-distance-join</module>
+        <module>spatial-knn-join</module>
     </modules>
 
     <properties>
